@@ -4,6 +4,8 @@
 // Author: Ishmael Smyrnow
 L.Control.GroupedLayers = L.Control.extend({
 
+  globalLayerSwitcherEnabled: false,  //has to be enabled first
+
   options: {
     collapsed: true,
     position: 'topright',
@@ -33,6 +35,52 @@ L.Control.GroupedLayers = L.Control.extend({
     }
   },
 
+  addGlobalLayerSwitcher: function()  {
+
+    this.globalLayerSwitcherEnabled = true;
+
+    var $input = $("<input type='checkbox' id='all-overlays-switch' name='all-overlays-switch' value='all' class='leaflet-control-layers-selector leaflet-control-all-overlays' checked='checked'/>" );
+    var $span = $("<span class='leaflet-control-all-overlays'> All overlays</span>");
+
+    var $label = $("<label/>");
+    $label.append($input);
+    $label.append($span);
+
+    $(".leaflet-control-layers-overlays" ).prepend($label);
+    thisLocal = this;
+
+    $("#all-overlays-switch").click(function() {
+
+      if(document.getElementById('all-overlays-switch').checked) {
+        //switch all off
+        for (var i in thisLocal._layers) {
+          if (thisLocal._layers[i].overlay) {
+            if (!thisLocal._map.hasLayer(thisLocal._layers[i].layer)) {
+              thisLocal._map.addLayer(thisLocal._layers[i].layer);
+            }
+          }
+        }
+        $('.leaflet-control-layers-group-selector:not(:checked) ').trigger('click');
+
+      } else {
+        for (var i in thisLocal._layers) {
+          if (thisLocal._layers[i].overlay) {
+            if (thisLocal._map.hasLayer(thisLocal._layers[i].layer)) {
+              thisLocal._map.removeLayer(thisLocal._layers[i].layer);
+            }
+          }
+        }
+        $('.leaflet-control-layers-group-selector:checked').trigger('click');
+      }
+
+      /*if (input.checked && !this._map.hasLayer(obj.layer)) {
+        this._map.addLayer(obj.layer);
+      } else if (!input.checked && this._map.hasLayer(obj.layer)) {
+        this._map.removeLayer(obj.layer);
+
+      }*/
+    });
+  },
   onAdd: function (map) {
     this._initLayout();
     this._update();
@@ -46,8 +94,8 @@ L.Control.GroupedLayers = L.Control.extend({
 
   onRemove: function (map) {
     map
-        .off('layeradd', this._onLayerChange, this)
-        .off('layerremove', this._onLayerChange, this);
+        .off('layeradd', this._onLayerChange)
+        .off('layerremove', this._onLayerChange);
   },
 
   addBaseLayer: function (layer, name) {
@@ -72,6 +120,15 @@ L.Control.GroupedLayers = L.Control.extend({
     return this;
   },
 
+  getLayerByName: function (name) {
+    for (var i = 0; i < this._layers.length; i++) {
+      if (this._layers[i] && this._layers[i].name.indexOf(name) !== -1 ) {
+        return this._layers[i];
+      }
+    }
+    return false;
+  },
+
   _getLayer: function (id) {
     for (var i = 0; i < this._layers.length; i++) {
       if (this._layers[i] && L.stamp(this._layers[i].layer) === id) {
@@ -88,9 +145,11 @@ L.Control.GroupedLayers = L.Control.extend({
     container.setAttribute('aria-haspopup', true);
 
     if (L.Browser.touch) {
-      L.DomEvent.on(container, 'click', L.DomEvent.stopPropagation);
+      L.DomEvent.disableClickPropagation(container);
+      L.DomEvent.disableScrollPropagation(container);
     } else {
       L.DomEvent.disableClickPropagation(container);
+      L.DomEvent.disableScrollPropagation(container);
       L.DomEvent.on(container, 'wheel', L.DomEvent.stopPropagation);
     }
 
@@ -173,9 +232,15 @@ L.Control.GroupedLayers = L.Control.extend({
 
     for (var i = 0; i < this._layers.length; i++) {
       obj = this._layers[i];
-      this._addItem(obj);
-      overlaysPresent = overlaysPresent || obj.overlay;
-      baseLayersPresent = baseLayersPresent || !obj.overlay;
+      if (obj) {
+          this._addItem(obj);
+      }
+      overlaysPresent = overlaysPresent || (obj && obj.overlay);
+      baseLayersPresent = baseLayersPresent || (obj && !obj.overlay);
+    }
+
+    if(this.globalLayerSwitcherEnabled)  {
+      this.addGlobalLayerSwitcher();
     }
 
     this._separator.style.display = overlaysPresent && baseLayersPresent ? '' : 'none';
@@ -234,6 +299,11 @@ L.Control.GroupedLayers = L.Control.extend({
         input.type = 'checkbox';
         input.className = 'leaflet-control-layers-selector';
         input.defaultChecked = checked;
+
+		if (obj.group.name !== '' ) { //add indentation
+          var whitespace = document.createTextNode('\u00A0\u00A0\u00A0');
+          label.appendChild(whitespace);
+        }
       }
     } else {
       input = this._createRadioElement('leaflet-base-layers', checked);
@@ -263,17 +333,21 @@ L.Control.GroupedLayers = L.Control.extend({
         var groupLabel = document.createElement('label');
         groupLabel.className = 'leaflet-control-layers-group-label';
 
+
         if (obj.group.name !== '' && !obj.group.exclusive) {
           // ------ add a group checkbox with an _onInputClickGroup function
           if (this.options.groupCheckboxes) {
             var groupInput = document.createElement('input');
             groupInput.type = 'checkbox';
+            groupInput.checked = 'checked'; //TODO switch on by default
             groupInput.className = 'leaflet-control-layers-group-selector';
             groupInput.groupID = obj.group.id;
             groupInput.legend = this;
             L.DomEvent.on(groupInput, 'click', this._onGroupInputClick, groupInput);
             groupLabel.appendChild(groupInput);
           }
+        } else {
+          groupLabel.setAttribute('class','d-none');
         }
 
         var groupName = document.createElement('span');
@@ -331,7 +405,7 @@ L.Control.GroupedLayers = L.Control.extend({
 
     for (i = 0; i < inputsLen; i++) {
       input = inputs[i];
-      if (input.className === 'leaflet-control-layers-selector') {
+      if (input.className === 'leaflet-control-layers-selector'  &&  input.className !== 'leaflet-control-all-overlays') {
         obj = this._getLayer(input.layerId);
 
         if (input.checked && !this._map.hasLayer(obj.layer)) {
